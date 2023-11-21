@@ -4,6 +4,15 @@
 #include "framework.h"
 #include "WinUI3XamlIslandsWin32.h"
 
+#include <Microsoft.UI.Dispatching.Interop.h>
+#include <winrt/Microsoft.UI.Content.h>
+#include <winrt/Microsoft.UI.Interop.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
+#include <winrt/Microsoft.UI.Xaml.Hosting.h>
+
+#include <cassert>
+
 #define MAX_LOADSTRING 100
 
 // Global Variables:
@@ -13,9 +22,11 @@ WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
+HWND                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+
+winrt::Microsoft::UI::Xaml::Hosting::DesktopWindowXamlSource desktopWindowXamlSource{ nullptr };
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -33,10 +44,27 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     MyRegisterClass(hInstance);
 
     // Perform application initialization:
-    if (!InitInstance (hInstance, nCmdShow))
+    HWND hWnd = InitInstance(hInstance, nCmdShow);
+    if (!hWnd)
     {
         return FALSE;
     }
+
+    HMODULE library = LoadLibraryA("Microsoft.UI.Windowing.Core.dll");
+    assert(library != 0);
+    BOOL(*ContentPreTranslateMessage)(const MSG*) = reinterpret_cast<BOOL(*)(const MSG*)>(GetProcAddress(library, "ContentPreTranslateMessage"));
+
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    auto dispatcherQueueController = winrt::Microsoft::UI::Dispatching::DispatcherQueueController::CreateOnCurrentThread();
+    auto windowsXamlManager = winrt::Microsoft::UI::Xaml::Hosting::WindowsXamlManager::InitializeForCurrentThread();
+    desktopWindowXamlSource = winrt::Microsoft::UI::Xaml::Hosting::DesktopWindowXamlSource{};
+    auto windowId = winrt::Microsoft::UI::GetWindowIdFromWindow(hWnd);
+    desktopWindowXamlSource.Initialize(windowId);
+    winrt::Microsoft::UI::Xaml::Controls::TextBox textBox;
+    desktopWindowXamlSource.Content(textBox);
+
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
 
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_WINUI3XAMLISLANDSWIN32));
 
@@ -47,10 +75,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     {
         if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
         {
+            ContentPreTranslateMessage(&msg);
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
     }
+
+    FreeLibrary(library);
 
     return (int) msg.wParam;
 }
@@ -93,22 +124,14 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //        In this function, we save the instance handle in a global variable and
 //        create and display the main program window.
 //
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+HWND InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // Store instance handle in our global variable
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
 
-   if (!hWnd)
-   {
-      return FALSE;
-   }
-
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
-
-   return TRUE;
+   return hWnd;
 }
 
 //
@@ -150,6 +173,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             EndPaint(hWnd, &ps);
         }
         break;
+    case WM_SIZE: {
+        UINT width = LOWORD(lParam);
+        UINT height = HIWORD(lParam);
+        auto windowId = desktopWindowXamlSource.SiteBridge().WindowId();
+        auto xamlHostHwnd = winrt::Microsoft::UI::GetWindowFromWindowId(windowId);
+        ::SetWindowPos(xamlHostHwnd, NULL, 0, 0, width, height, SWP_SHOWWINDOW);
+        break;
+    }
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
